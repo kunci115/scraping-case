@@ -117,6 +117,104 @@ in the same directory if needed.
 
 ## Candidate Notes
 
+### Flow diagrams
+
+#### Level 1 — Parsing
+
+```mermaid
+flowchart LR
+    subgraph parse_amount
+        A1[raw string] --> B1[strip €, EUR, spaces]
+        B1 --> C1[remove . thousands sep]
+        C1 --> D1[comma → decimal point]
+        D1 --> E1{float cast}
+        E1 -->|ok| F1[float]
+        E1 -->|fail| G1[None]
+    end
+
+    subgraph parse_date
+        A2[raw string] --> B2{YYYY-MM-DD?}
+        B2 -->|yes| F2[date]
+        B2 -->|no| C2{DD/MM/YYYY?}
+        C2 -->|yes| F2
+        C2 -->|no| D2{DD mese YYYY?}
+        D2 -->|yes, month in dict| F2
+        D2 -->|no| G2[None]
+    end
+
+    subgraph is_valid_cig
+        A3[cig] --> B3{not None/empty?}
+        B3 -->|no| G3[False]
+        B3 -->|yes| C3{len == 10?}
+        C3 -->|no| G3
+        C3 -->|yes| D3{all alnum?}
+        D3 -->|no| G3
+        D3 -->|yes| E3{not placeholder?}
+        E3 -->|no| G3
+        E3 -->|yes| F3[True]
+    end
+```
+
+#### Level 2 — Maggioli portal scraper
+
+```mermaid
+flowchart TD
+    A[scrape_portal base_url] --> B[GET homepage\nestablish JSESSIONID cookie]
+    B --> C[GET listing page N]
+    C --> D[wait for FriendlyCaptcha\n#tender-list visible ~3s]
+    D --> E[parse tender rows\nextract id + title]
+    E --> F{more pages?}
+    F -->|yes| C
+    F -->|no| G[for each tender id]
+
+    G --> H[GET detail page]
+    H --> I{503?}
+    I -->|yes, attempt 1| J[sleep 1s → retry]
+    J --> H
+    I -->|no| K{detect layout}
+
+    K -->|table.dettaglio-bando| L0[Layout 0\nth/td rows]
+    K -->|dl.dati-gara| L1[Layout 1\ndt/dd pairs\namount from JS DOM]
+    K -->|box-dati-principali| L2[Layout 2\nsingle-pass campo map\nclick JS doc toggle]
+
+    L0 --> M[parse fields\nnormalise URLs\nvalidate CIG/CUP]
+    L1 --> M
+    L2 --> M
+    M --> N[TenderResult]
+    N --> O{more tenders?}
+    O -->|yes| G
+    O -->|no| P[return list TenderResult]
+```
+
+#### Level 3 — ANAC CIG enrichment
+
+```mermaid
+flowchart TD
+    subgraph enrich_cig [enrich_cig single CIG]
+        A[load /cig/CIG] --> B[wait SPA boot ~1s\n#consent-check appears]
+        B --> C[click consent checkbox]
+        C --> D[wait 1.5s mosparo validation\n_mosparo_session cookie set\nbutton enabled]
+        D --> E[click Cerca button]
+        E --> F[wait #result non-empty]
+        F --> G[parse JSON from #result]
+        G --> H{bando null?}
+        H -->|yes| I[None]
+        H -->|no| J[CIGDetail]
+    end
+
+    subgraph enrich_batch [enrich_batch N CIGs]
+        AA[cigs list] --> BB[first CIG → full SPA flow\nestablishes _mosparo_session]
+        BB --> CC{more CIGs?}
+        CC -->|yes| DD[sleep 5s rate limit]
+        DD --> EE[direct fetch POST to API\nreuse cookie from browser context]
+        EE --> FF[parse response\ndict or list format]
+        FF --> CC
+        CC -->|no| GG[return dict str CIGDetail or None]
+    end
+```
+
+---
+
 ### How to run
 
 With the mock server running, the candidate code can be exercised from a Python

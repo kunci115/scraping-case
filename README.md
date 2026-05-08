@@ -13,9 +13,12 @@ You may submit only the first levels if you prefer.
 
 ## Setup
 
+> **Note:** the mock server's `.pyc` files are compiled for **Python 3.11**.
+> Using 3.12+ will raise `ImportError: bad magic number`. Use Python 3.11 explicitly.
+
 ```bash
-# 1. Create a virtualenv
-python -m venv .venv
+# 1. Create a virtualenv with Python 3.11
+python3.11 -m venv .venv
 source .venv/bin/activate
 
 # 2. Install dependencies
@@ -114,23 +117,36 @@ in the same directory if needed.
 
 ## Candidate Notes
 
-### Setup note — Python version
+### How to run
 
-The mock server's `.pyc` files are compiled with **Python 3.11**. Using a newer
-version (3.12+) will cause an `ImportError: bad magic number` when uvicorn tries
-to load the app. Make sure your virtualenv uses Python 3.11:
+With the mock server running, the candidate code can be exercised from a Python
+REPL or a short script:
 
-```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-playwright install chromium
-```
+```python
+import asyncio
+from candidate.parsers import parse_amount, parse_date, is_valid_cig
+from candidate.scraper import scrape_portal
+from candidate.enricher import enrich_cig, enrich_batch
 
-Then in a separate terminal:
+BASE = "http://127.0.0.1:18080"
 
-```bash
-uvicorn mock_server.app:app --host 127.0.0.1 --port 18080
+# Level 1 — pure parsing, no server needed
+print(parse_amount("€ 1.234.567,89"))   # 1234567.89
+print(parse_date("25 giugno 2026"))      # 2026-06-25
+print(is_valid_cig("A0123456BC"))        # True
+
+# Level 2 — scrape all tenders
+tenders = asyncio.run(scrape_portal(BASE))
+for t in tenders:
+    print(t.tender_id, t.cig, t.amount)
+
+# Level 3 — enrich a single CIG
+detail = asyncio.run(enrich_cig("A0123456BC", BASE))
+print(detail)
+
+# Level 3 — batch enrichment (respects 5s rate limit between requests)
+details = asyncio.run(enrich_batch(["A0123456BC", "B9876543DE"], BASE))
+print(details)
 ```
 
 ---

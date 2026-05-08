@@ -109,3 +109,71 @@ in the same directory if needed.
 - For Levels 2 and 3, **explore the portal manually with your browser** before
   writing code — it is the best way to understand the structure
 - The Level 1 functions are useful in Level 2 — reuse them
+
+---
+
+## Candidate Notes
+
+### Setup note — Python version
+
+The mock server's `.pyc` files are compiled with **Python 3.11**. Using a newer
+version (3.12+) will cause an `ImportError: bad magic number` when uvicorn tries
+to load the app. Make sure your virtualenv uses Python 3.11:
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+playwright install chromium
+```
+
+Then in a separate terminal:
+
+```bash
+uvicorn mock_server.app:app --host 127.0.0.1 --port 18080
+```
+
+---
+
+### Level 1 — Parsing utilities
+
+#### `parse_amount`
+
+Italian locale uses `.` as thousands separator and `,` as decimal separator,
+the opposite of English. The approach is a simple strip-and-replace pipeline:
+strip currency symbols (`€`, `EUR`) and whitespace, remove all `.` (they can
+only be thousands separators in this context), replace `,` with `.`, then cast
+to `float`.
+
+I chose plain string operations over a regex here because the transformation is
+sequential and each step has a clear purpose — easier to read and debug. The
+function is O(n) in input length, which is effectively O(1) since currency
+strings are always short.
+
+**Assumption:** any `.` appearing before the decimal comma is a thousands
+separator. A bare integer like `"500"` with no decimal part is also valid.
+
+#### `parse_date`
+
+Three formats appear in the data:
+
+| Format | Example |
+|---|---|
+| `DD/MM/YYYY` | `15/06/2026` |
+| `DD mese YYYY` (Italian month name) | `25 giugno 2026` |
+| `YYYY-MM-DD` (ISO) | `2026-07-20` |
+
+I used `re.fullmatch` with one pattern per format rather than `strptime`, mainly
+because `strptime` with `%B` is locale-dependent and would require setting the
+system locale to `it_IT` — a fragile runtime dependency. The Italian month
+lookup is a plain dict, O(1).
+
+#### `is_valid_cig`
+
+A CIG is valid if it is exactly 10 alphanumeric characters and not a known
+placeholder. The placeholder set (`0000000000`, `0000000001`, `XXXXXXXXXX`)
+was identified by inspecting the portal data — these appear in real Italian
+procurement portals when a CIG has not been assigned yet.
+
+**Assumption:** the placeholder set is fixed and well-known. If new placeholder
+patterns emerge in production, the set would need to be extended.

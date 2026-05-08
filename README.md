@@ -247,3 +247,48 @@ stored in the result.
 CIG values that pass `is_valid_cig` are stored as-is; placeholders and empty
 strings become `None`. Empty CUP strings are also coerced to `None` so the
 `TenderResult` model stays clean.
+
+---
+
+### Level 3 — ANAC CIG enrichment
+
+#### SPA interaction flow
+
+The ANAC detail page is a JavaScript SPA. The automation sequence is:
+
+1. Navigate to `/cig/{CIG}` — page shows a loading spinner for ~1 second
+2. Wait for `#consent-check` to appear (SPA boot complete)
+3. Click the consent checkbox — triggers a simulated Mosparo anti-bot validation (1.5s delay), sets `_mosparo_session` cookie, and enables the submit button
+4. Click `#cerca-btn` — page fires a `fetch` POST to the API and writes the JSON result into `#result`
+5. Wait until `#result` has non-empty content that is not the loading string `"Ricerca in corso..."`
+6. Parse `textContent` of `#result` as JSON
+
+#### API response format
+
+The API endpoint `POST /api/v1/operations/consultaCIG/1.0/exec` returns either:
+- `{"bando": {...}}` — a plain object (some CIGs)
+- `[{"bando": {...}}]` — a single-element array (other CIGs)
+- `{"bando": null}` — CIG exists but has no ANAC record → return `None`
+
+The mock server's `CIG_DETAILS` dict stores values as `dict | list`, which is why both
+formats appear. The parser normalises the list form to a dict before reading.
+
+**Assumption:** the first element of the list is always the relevant record.
+Real ANAC APIs may return multiple gara entries per CIG; this implementation
+takes the first.
+
+#### Rate limiting
+
+The server enforces a 5-second cooldown per CIG per IP. Requests within the
+window receive a WAF-style 403 HTML response (not JSON).
+
+`enrich_batch` optimises for the common case:
+
+- **First CIG:** full SPA flow (1s boot + 1.5s mosparo + API call) — this
+  establishes the `_mosparo_session` cookie in the browser context
+- **Remaining CIGs:** skip the SPA entirely; call the API directly via
+  `page.evaluate(fetch(...))` which reuses the cookie already in the browser
+  context, with a 5-second `asyncio.sleep` between each call
+
+This avoids ~2.5 seconds of SPA overhead per CIG after the first one while
+still respecting the rate limit.

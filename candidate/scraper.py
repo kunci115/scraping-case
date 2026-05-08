@@ -77,13 +77,15 @@ def _parse_layout1(soup: BeautifulSoup, tender_id: int, base_url: str) -> dict:
     }
 
 
-def _campo_value(soup: BeautifulSoup, label: str) -> str:
+def _build_campo_map(soup: BeautifulSoup) -> dict[str, str]:
+    """Single-pass scan of all campo-dato divs → label:value dict."""
+    out: dict[str, str] = {}
     for div in soup.find_all("div", class_="campo-dato"):
         lbl = div.find("label")
-        if lbl and lbl.get_text(strip=True) == label:
+        if lbl:
             span = div.find("span", class_="valore")
-            return span.get_text(strip=True) if span else ""
-    return ""
+            out[lbl.get_text(strip=True)] = span.get_text(strip=True) if span else ""
+    return out
 
 
 async def _parse_layout2(page: Page, soup: BeautifulSoup, tender_id: int, base_url: str) -> dict:
@@ -109,14 +111,15 @@ async def _parse_layout2(page: Page, soup: BeautifulSoup, tender_id: int, base_u
                 if a.get_text(strip=True)
             ]
 
+    data = _build_campo_map(soup)
     return {
-        "cig": _campo_value(soup, "CIG"),
-        "cup": _campo_value(soup, "CUP"),
-        "amount": _campo_value(soup, "Importo a base di gara"),
-        "deadline": _campo_value(soup, "Scadenza presentazione offerte"),
-        "pub_date": _campo_value(soup, "Data pubblicazione"),
-        "contracting_body": _campo_value(soup, "Stazione appaltante"),
-        "procedure_type": _campo_value(soup, "Procedura"),
+        "cig": data.get("CIG", ""),
+        "cup": data.get("CUP", ""),
+        "amount": data.get("Importo a base di gara", ""),
+        "deadline": data.get("Scadenza presentazione offerte", ""),
+        "pub_date": data.get("Data pubblicazione", ""),
+        "contracting_body": data.get("Stazione appaltante"),
+        "procedure_type": data.get("Procedura"),
         "documents": docs,
     }
 

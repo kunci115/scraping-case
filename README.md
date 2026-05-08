@@ -177,3 +177,73 @@ procurement portals when a CIG has not been assigned yet.
 
 **Assumption:** the placeholder set is fixed and well-known. If new placeholder
 patterns emerge in production, the set would need to be extended.
+
+---
+
+### Level 2 — Maggioli PortaleAppalti scraper
+
+#### Session management
+
+The portal requires a `JSESSIONID` cookie set by the homepage before any
+listing or detail request. Without it, the server returns a 302 redirect to
+the login page. The scraper visits the homepage first and lets Playwright carry
+the cookie automatically for all subsequent requests in the same browser
+context.
+
+#### FriendlyCaptcha
+
+The listing page renders the tender table with `display:none` and shows a
+captcha overlay for ~3 seconds before removing it via `setTimeout`. The scraper
+waits for `#tender-list` to become visible (`state="visible"`) rather than
+sleeping a fixed duration — this is more reliable and adapts if the delay
+changes.
+
+#### Three HTML layouts
+
+The detail page is rendered in one of three distinct HTML structures depending
+on the tender ID. The scraper detects the layout by probing for a unique
+landmark element in order of specificity:
+
+| Layout | Detection | Key quirk |
+|---|---|---|
+| 0 | `<table class="dettaglio-bando">` | Straightforward `<th>`/`<td>` rows |
+| 1 | `<dl class="dati-gara">` | Amount element starts empty; filled by an inline IIFE script |
+| 2 | `<div class="box-dati-principali">` | Documents only appear after clicking a JS toggle button |
+
+For Layout 1, the inline script runs synchronously during HTML parsing, so
+`page.content()` (which reflects the live post-JS DOM) already contains the
+populated amount element — no extra wait needed.
+
+For Layout 2, the scraper clicks `#btn-allegati-{id}` and waits for the first
+link inside `#allegati-container-{id}` to appear before re-reading the DOM.
+
+Layout 1 also contains a hidden decoy `<div class="scheda-dettaglio">` with
+intentionally wrong CIG and amount values. The scraper reads exclusively from
+the `<dl class="dati-gara">` element, so the decoy is never reached.
+
+#### Transient 503 on tender #9
+
+The mock server returns 503 on the first request for tender #9. The scraper
+retries once after a 1-second pause and succeeds on the second attempt.
+
+**Assumption:** one retry is enough; a real-world implementation would use
+exponential backoff with a configurable max-attempts limit.
+
+#### Document URL normalization
+
+Document links appear in three forms across the portal pages:
+
+| Form | Example | Action |
+|---|---|---|
+| Already absolute | `https://example.com/docs/…` | Use as-is |
+| Root-relative | `/docs/1/Bando.pdf` | Prepend `base_url` |
+| Relative (no leading slash) | `docs/5/Relazione.pdf` | Prepend `base_url/` |
+
+All `DocumentRef.url` values are normalized to absolute URLs before being
+stored in the result.
+
+#### CIG and CUP validation
+
+CIG values that pass `is_valid_cig` are stored as-is; placeholders and empty
+strings become `None`. Empty CUP strings are also coerced to `None` so the
+`TenderResult` model stays clean.
